@@ -2,11 +2,68 @@ import gradio as gr
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
+from huggingface_hub import login
 import time
+import os
+import re
 
 # Global variables for model
 model = None
 tokenizer = None
+
+# Login to HuggingFace (required for gated models like Gemma)
+HF_TOKEN = os.environ.get("HF_TOKEN")
+if HF_TOKEN:
+    login(token=HF_TOKEN, add_to_git_credential=False)
+    print("✓ Authenticated with HuggingFace")
+else:
+    print("⚠️ No HF_TOKEN found. Add it to Space secrets if using gated models.")
+
+def is_legal_text(text, min_legal_terms=3):
+    """
+    Validate if input text is legal content.
+    
+    Returns: (is_valid, reason)
+    """
+    # Legal keywords that should appear in court judgments
+    legal_keywords = {
+        'court', 'plaintiff', 'defendant', 'appellant', 'appellee',
+        'petitioner', 'respondent', 'judge', 'justice', 'magistrate',
+        'verdict', 'judgment', 'ruling', 'order', 'decree', 'opinion',
+        'motion', 'complaint', 'petition', 'brief', 'testimony',
+        'evidence', 'trial', 'hearing', 'case', 'proceeding',
+        'statute', 'law', 'legal', 'liability', 'damages', 'relief',
+        'counsel', 'attorney', 'breach', 'contract', 'agreement'
+    }
+    
+    # Patterns that indicate non-legal content
+    non_legal_patterns = [
+        (r'\b(recipe|ingredient|cook|bake|oven|cup|tablespoon|teaspoon)\b', 'cooking recipe'),
+        (r'\b(software|app|download|install|click here|website|tutorial)\b', 'technology/tutorial content'),
+        (r'\b(how to make|step \d+|instructions|procedure)\b', 'instructional content'),
+        (r'\b(buy now|price|discount|sale|product|shop|purchase)\b', 'commercial/shopping content'),
+        (r'\b(artificial intelligence|machine learning|neural network|algorithm)\b', 'AI/tech article'),
+    ]
+    
+    text_lower = text.lower()
+    word_count = len(text.split())
+    
+    # Reject if too short
+    if word_count < 30:
+        return False, "Text too short (minimum 30 words required for legal judgment)"
+    
+    # Check for non-legal patterns
+    for pattern, content_type in non_legal_patterns:
+        if re.search(pattern, text_lower):
+            return False, f"This appears to be {content_type}, not a legal case"
+    
+    # Count legal keywords
+    legal_count = sum(1 for keyword in legal_keywords if keyword in text_lower)
+    
+    if legal_count < min_legal_terms:
+        return False, f"Insufficient legal terminology (found {legal_count} legal terms, need at least {min_legal_terms})"
+    
+    return True, f"Valid legal text detected ({legal_count} legal terms found)"
 
 def load_model():
     """Load the fine-tuned model and tokenizer"""
@@ -18,7 +75,7 @@ def load_model():
     print("Loading model... This may take 2-3 minutes.")
     
     # Configuration
-    MODEL_PATH = "./model_outputs"  # Local path to your trained adapters
+    MODEL_PATH = "."  # Model files are in root directory on HF Spaces
     BASE_MODEL_NAME = "google/gemma-2b"
     
     # Load tokenizer
@@ -31,32 +88,77 @@ def load_model():
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # Configure quantization
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-    )
+    # Check if GPU is available
+    has_gpu = torch.cuda.is_available()
+    print(f"GPU available: {has_gpu}")
     
-    # Load base model
-    base_model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL_NAME,
-        quantization_config=bnb_config,
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    
-    # Load LoRA adapters
-    model = PeftModel.from_pretrained(
-        base_model,
-        MODEL_PATH,
-        is_trainable=False
-    )
-    model.eval()
-    
-    print("✓ Model loaded successfully!")
-    return model, tokenizer
+    try:
+        if has_gpu:
+            # GPU: Use 4-bit quantization
+            print("Loading model with 4-bit quantization (GPU)...")
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
+            
+            base_model = AutoModelForCausalLM.from_pretrained(
+                BASE_MODEL_NAME,
+                quantization_config=bnb_config,
+                device_map="auto",
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+            )
+        else:
+            # CPU: Load in 8-bit or full precision with CPU offloading
+            print("Loading model for CPU (this may take 2-3 minutes)...")
+            bnb_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=True,
+            )
+            
+            base_model = AutoModelForCausalLM.from_pretrained(
+                BASE_MODEL_NAME,
+                quantization_config=bnb_config,
+                device_map="auto",
+                trust_remote_code=True,
+                low_cpu_mem_usage=True,
+            )
+        
+        # Load LoRA adapters
+        model = PeftModel.from_pretrained(
+            base_model,
+            MODEL_PATH,
+            is_trainable=False
+        )
+        model.eval()
+        
+        print("✓ Model loaded successfully!")
+        return model, tokenizer
+        
+    except Exception as e:
+        print(f"Error loading with quantization: {e}")
+        print("Attempting to load without quantization (slower but more compatible)...")
+        
+        # Fallback: Load without quantization
+        base_model = AutoModelForCausalLM.from_pretrained(
+            BASE_MODEL_NAME,
+            device_map="cpu",
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+            torch_dtype=torch.float32,
+        )
+        
+        model = PeftModel.from_pretrained(
+            base_model,
+            MODEL_PATH,
+            is_trainable=False
+        )
+        model.eval()
+        
+        print("✓ Model loaded (CPU mode, no quantization)")
+        return model, tokenizer
 
 def generate_summary(model, tokenizer, judgment_text, max_length=256):
     """Generate summary for a legal judgment"""
@@ -101,6 +203,28 @@ def predict(judgment_text, max_length):
     if not judgment_text or not judgment_text.strip():
         return "⚠️ Please enter a legal judgment to summarize.", "", ""
     
+    # Validate input is legal text
+    is_valid, reason = is_legal_text(judgment_text)
+    
+    if not is_valid:
+        warning_msg = f"""⚠️ INPUT VALIDATION FAILED
+
+{reason}
+
+This model is specifically trained for **legal case summarization** and will not process non-legal content.
+
+✅ Expected input types:
+• Court judgments
+• Legal case documents  
+• Judicial opinions
+• Legal briefs or rulings
+
+The text should contain legal terminology such as: court, plaintiff, defendant, judge, ruling, judgment, case, motion, etc.
+
+If you believe this is a legal document, please ensure it contains appropriate legal terminology.
+"""
+        return warning_msg, "", "❌ Validation failed - non-legal content detected"
+    
     try:
         # Load model (cached after first run)
         model, tokenizer = load_model()
@@ -111,14 +235,22 @@ def predict(judgment_text, max_length):
         elapsed_time = time.time() - start_time
         
         # Format stats
-        stats = f"⏱️ Generated in {elapsed_time:.2f} seconds | 📊 Summary: ~{len(summary.split())} words"
+        stats = f"✓ Validation passed: {reason}\n⏱️ Generated in {elapsed_time:.2f} seconds | 📊 Summary: ~{len(summary.split())} words"
         status = "✅ Summary generated successfully!"
         
         return summary, stats, status
         
     except Exception as e:
-        error_msg = f"❌ Error: {str(e)}\n\nMake sure model files are in './model_outputs/' directory"
-        return error_msg, "", ""
+        error_msg = f"""❌ Error during generation: {str(e)}
+
+Troubleshooting:
+• Check that model files exist in the Space root directory
+• Verify HF_TOKEN is set in Space secrets (for gated models)
+• Try using a shorter input text (< 1000 words)
+
+If the error persists, the Space may need more memory. Consider upgrading to GPU hardware.
+"""
+        return error_msg, "", "❌ Generation failed"
 
 # Example legal cases
 EXAMPLES = [
@@ -137,13 +269,19 @@ EXAMPLES = [
 ]
 
 # Build Gradio interface
-with gr.Blocks(theme=gr.themes.Soft(), title="Legal Case Summarizer") as demo:
-    gr.Markdown("""
+with gr.Blocks(title="Legal Case Summarizer") as demo:
+    # Check hardware on startup
+    hardware_status = "🟢 GPU" if torch.cuda.is_available() else "🟡 CPU"
+    performance_note = "" if torch.cuda.is_available() else "\n⏳ **Note:** Running on CPU - generation may take 30-60 seconds per summary."
+    
+    gr.Markdown(f"""
     # ⚖️ Legal Case Summarization Assistant
-    ### Powered by LoRA Fine-tuned Gemma-2B
+    ### Powered by LoRA Fine-tuned Gemma-2B {hardware_status}
     
     Generate concise summaries of legal court judgments using AI. This model was fine-tuned on legal case data 
-    and achieves 79% BERTScore F1 for semantic accuracy.
+    and achieves 79% BERTScore F1 for semantic accuracy.{performance_note}
+    
+    ⚠️ **Important:** This model only processes legal case documents. Non-legal content will be rejected.
     """)
     
     with gr.Row():
@@ -185,8 +323,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Legal Case Summarizer") as demo:
                 label="Summary",
                 placeholder="Your summary will appear here...",
                 lines=13,
-                max_lines=15,
-                show_copy_button=True
+                max_lines=15
             )
             
             stats_output = gr.Textbox(
@@ -234,4 +371,4 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Legal Case Summarizer") as demo:
 # Launch the app
 if __name__ == "__main__":
     demo.queue()  # Enable queuing for better performance
-    demo.launch()
+    demo.launch(share=False)

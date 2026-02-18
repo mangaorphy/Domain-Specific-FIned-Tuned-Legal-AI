@@ -22,12 +22,15 @@ build/
 
 # Model files (too large for GitHub)
 *.bin
-*.safetensors
 *.h5
 *.onnx
 *.pkl
 *.pth
 *.pt
+
+# Allow LoRA adapter files (small enough for GitHub)
+!model_outputs/adapter_model.safetensors
+!model_outputs/*.safetensors
 
 # Data files
 data/
@@ -58,3 +61,4 @@ kaggle.json
 *.tmp
 *.bak
 *~
+.DS_Store
