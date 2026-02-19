@@ -20,9 +20,20 @@ metrics:
 - bertscore
 ---
 
-# 📚 Legal Case Summarization Model (LoRA Fine-tuned Gemma-2B)
+# Legal Case Summarization Model (LoRA Fine-tuned Gemma-2B)
 
 A domain-specific fine-tuned model for automated legal case summarization, built on Google's Gemma-2B using Low-Rank Adaptation (LoRA).
+
+## Try It Now!
+
+**Live Demo:** [https://huggingface.co/spaces/manga44/TogetherSO](https://huggingface.co/spaces/manga44/TogetherSO)
+
+Test the model directly in your browser with our interactive Gradio interface. The demo includes:
+- Real-time legal case summarization
+- Performance metrics display
+- Input validation (legal content only)
+- Pre-loaded example cases
+- Modern, user-friendly interface
 
 ## Model Overview
 
@@ -58,6 +69,44 @@ This model generates concise summaries of complex legal court judgments, trained
 
 **Key Insight:** The high BERTScore (79% F1) indicates the model captures semantic meaning effectively, even if it uses different phrasing than reference summaries. This is particularly valuable for legal summarization where semantic accuracy matters more than exact word matching.
 
+## Sample Predictions
+
+Here's a real example of the model's output quality:
+
+### Example: Judicial Review Case
+
+**Input (excerpt):**
+```
+The appellant brought a claim for judicial review of a decision of the respondent, 
+on 21 February 2012, to approve a Revenue Budget for 2012/13 in relation to the 
+provision of youth services. In his c...
+```
+
+**Reference Summary (Human-written):**
+```
+Mr Aaron Hunt, born on 17 April 1991, suffers from ADHD, learning difficulties and 
+behavioural problems. As a result, North Somerset Council (the Council) are statutorily 
+required, so far as reasonably practicable, to secure access for him to sufficient 
+educational and recreational leisure time activities for the improvement of his well being.
+On 21 February 2012, the Council made a decision to ap...
+```
+
+**Generated Summary (Model Output):**
+```
+The appellant was a young person with a disability who used to attend a weekly youth club.
+He was concerned about the impact which the reduction in the youth services budget was 
+likely to have on the provision of services for young persons with disabilities and in 
+particular on a weekly youth club for vulnerable young people which he used to attend.
+The appellant brought a claim for judicial revie...
+```
+
+**Analysis:**
+- **Semantic Accuracy:** Correctly identifies the core issue (budget cuts affecting youth services)judicial review
+- **Coherent Narrative:** Flows naturally and maintains legal context
+- **Style Difference:** Uses different phrasing than reference ("young person with a disability" vs specific details about Aaron Hunt)
+
+> **Note:** The model prioritizes semantic coherence over exact phrase matching, which explains the high BERTScore (79%) despite lower ROUGE scores. This approach is ideal for legal summarization where meaning is paramount.
+
 ## Model Architecture
 
 - **Base Model:** [google/gemma-2b](https://huggingface.co/google/gemma-2b) (2 billion parameters)
@@ -65,9 +114,9 @@ This model generates concise summaries of complex legal court judgments, trained
 - **Quantization:** 4-bit NF4 with double quantization
 - **LoRA Configuration:**
   - Rank (r): 16
-  - Alpha: 32
+  - Alpha: 16
   - Dropout: 0.05
-  - Target modules: `q_proj`, `k_proj`, `v_proj`, `o_proj`
+  - Target modules: `q_proj`, `k_proj`
 - **Trainable Parameters:** ~20M (only 1% of base model)
 
 ## Dataset
@@ -120,7 +169,17 @@ Response: [Generated summary]
 
 ## How to Use This Model
 
-### Installation
+### Option 1: Web Interface (Easiest)
+
+Visit the **[Live Demo](https://huggingface.co/spaces/manga44/TogetherSO)** to use the model instantly without any setup:
+1. Paste your legal judgment into the input box
+2. Adjust the summary length (128-512 tokens)
+3. Click "Generate Summary"
+4. View the AI-generated summary with performance stats
+
+**Running on CPU:** The demo runs on CPU hardware (free tier). Generation takes 130-300 seconds per summary.
+
+### Option 2: Local Installation
 
 ```bash
 pip install transformers peft torch bitsandbytes accelerate
@@ -159,7 +218,7 @@ tokenizer.pad_token = tokenizer.eos_token
 # Load LoRA adapters
 model = PeftModel.from_pretrained(
     base_model,
-    "./model_outputs",  # Path to your downloaded model
+    "./model_outputs",  # Path to downloaded model
     is_trainable=False
 )
 model.eval()
@@ -201,37 +260,6 @@ summary = summarize_legal_case(judgment)
 print(summary)
 ```
 
-### Using with Evaluation Script
-
-A standalone evaluation notebook is provided in `evaluate_trained_model.ipynb`:
-
-1. Update `MODEL_PATH` to your model location
-2. Ensure HuggingFace token is configured (for Gemma access)
-3. Run all cells to evaluate on 100 test samples
-4. Results saved to `evaluation_results.csv`
-
-## Example Summaries
-
-### Example 1: Contract Dispute
-
-**Input (truncated):**
-> "The appellant filed a suit for specific performance of contract. The respondent had agreed to sell a commercial property but later refused to complete the transaction citing the appellant's failure to pay the full consideration amount within the stipulated time..."
-
-**Generated Summary:**
-> "The court dismissed the appellant's claim for specific performance. The appellant failed to demonstrate readiness and willingness to perform the contract by the agreed deadline. The delay in payment was not adequately explained, and the respondent was entitled to withdraw from the agreement."
-
-**Key Strengths:** Captures main legal outcome, identifies critical issue (timing of payment), explains court's reasoning.
-
-### Example 2: Criminal Appeal
-
-**Input (truncated):**
-> "This is an appeal against conviction under Section 302 IPC. The appellant was convicted for murder based solely on circumstantial evidence. The prosecution relied on the recovery of the weapon and the appellant's presence in the vicinity at the time of the incident..."
-
-**Generated Summary:**
-> "The High Court upheld the conviction, finding the chain of circumstantial evidence complete. The recovery of the murder weapon from the appellant's possession, coupled with eyewitness testimony placing him at the scene and absence of credible alibi, established guilt beyond reasonable doubt."
-
-**Key Strengths:** Identifies case type, explains evidential basis, summarizes court's logical reasoning.
-
 ## Limitations & Considerations
 
 ### Current Limitations
@@ -242,7 +270,7 @@ A standalone evaluation notebook is provided in `evaluate_trained_model.ipynb`:
 
 3. **Context Length:** Input limited to 1024 tokens (~750 words) - very long judgments need pre-truncation.
 
-4. **No Citation Verification:** Model may hallucinate case citations or statute references - always verify legal citations.
+4. **No Citation Verification:** Model may hallucinate case citations or statute references and dates - always verify legal citations.
 
 5. **Training Data Bias:** Performance reflects the distribution of cases in the training dataset (may favor certain legal domains).
 
@@ -252,11 +280,11 @@ A standalone evaluation notebook is provided in `evaluate_trained_model.ipynb`:
 - ❌ **Not Suitable For:** Final legal advice, court submissions without review, replacing human judgment
 - **Always:** Have qualified legal professionals review generated summaries
 
-## 🔬 Technical Specifications
+## Technical Specifications
 
 ### Compute Infrastructure
 
-- **Hardware:** NVIDIA GPU with 16GB+ VRAM (T4, V100, A100, or equivalent)
+- **Hardware:** GPU with 16GB+ VRAM (T4, V100, A100, or equivalent)
 - **Cloud Platform:** Kaggle Notebooks (2x T4 GPUs)
 - **Software Stack:**
   - Python 3.10+
@@ -295,46 +323,13 @@ training_args = {
 
 lora_config = {
     'r': 16,
-    'lora_alpha': 316,
+    'lora_alpha': 16,
     'lora_dropout': 0.05,
     'bias': 'none',
     'task_type': 'CAUSAL_LM',
     'target_modules': ['q_proj', 'k_proj'],
 }
 ```
-
-##  Citation
-
-If you use this model in your research, please cite:
-
-```bibtex
-@misc{legal-summarization-lora-2026,
-  title={Domain-Specific Fine-Tuned Legal AI: Legal Case Summarization using LoRA},
-  author={Your Name},
-  year={2026},
-  publisher={HuggingFace},
-  howpublished={\url{https://huggingface.co/your-username/legal-summarization-lora}},
-}
-```
-
-**Dataset Citation:**
-```bibtex
-@article{niklaus2023legalsum,
-  title={MultiLegalPile: A 689GB Multilingual Legal Corpus},
-  author={Niklaus, Joel and others},
-  journal={arXiv preprint arXiv:2306.02069},
-  year={2023}
-}
-```
-
-## Contributing & Feedback
-
-Contributions welcome! Areas for improvement:
-- Expanding training data with more diverse legal domains
-- Implementing retrieval-augmented generation for citation accuracy
-- Multi-document summarization capabilities
-- Cross-lingual legal summarization
-
 ## License
 
 - **Model:** Gemma License (must accept terms at [google/gemma-2b](https://huggingface.co/google/gemma-2b))
@@ -348,15 +343,44 @@ Contributions welcome! Areas for improvement:
 - Hugging Face for PEFT and Transformers libraries
 - Kaggle for providing free GPU compute
 
-## Contact
+## Deployment
 
-For questions, issues, or collaboration opportunities, please open an issue in the repository.
+The model is deployed and publicly accessible via HuggingFace Spaces:
 
----
+**Live Application:** [https://huggingface.co/spaces/manga44/TogetherSO](https://huggingface.co/spaces/manga44/TogetherSO)
+
+**Features:**
+- Interactive Gradio interface with modern UI
+- Real-time input validation (rejects non-legal content)
+- Performance metrics dashboard
+- Example cases for quick testing
+- CPU-optimized with 8-bit quantization
+- Automatic preprocessing and output formatting
+
+**Technical Stack:**
+- Framework: Gradio 6.5.1
+- Deployment: HuggingFace Spaces (CPU)
+- Quantization: 8-bit with CPU offloading
+- Memory Usage: ~8GB RAM during inference
+
+## Use Cases
+
+**Ideal For:**
+- ✅ Legal research assistants reviewing case law
+- ✅ Law students studying court judgments
+- ✅ Legal tech platforms needing automated case summaries
+- ✅ Document triage in legal departments
+- ✅ Initial case analysis before detailed review
+
+**Not Recommended For:**
+- ❌ Final legal advice or court submissions without human review
+- ❌ Processing non-legal documents (model includes validation)
+- ❌ Cases requiring exact citation verification
+- ❌ Real-time applications requiring sub-second response times
 
 **Framework Versions:**
 - PEFT: 0.18.1
-- Transformers: 4.38+
+- Transformers: 5++
 - PyTorch: 2.0+
 - BitsAndBytes: 0.41+
 

@@ -36,13 +36,13 @@ def is_legal_text(text, min_legal_terms=3):
         'counsel', 'attorney', 'breach', 'contract', 'agreement'
     }
     
-    # Patterns that indicate non-legal content
+    # Patterns that indicate non-legal content (must be specific to avoid false positives)
     non_legal_patterns = [
         (r'\b(recipe|ingredient|cook|bake|oven|cup|tablespoon|teaspoon)\b', 'cooking recipe'),
-        (r'\b(software|app|download|install|click here|website|tutorial)\b', 'technology/tutorial content'),
-        (r'\b(how to make|step \d+|instructions|procedure)\b', 'instructional content'),
-        (r'\b(buy now|price|discount|sale|product|shop|purchase)\b', 'commercial/shopping content'),
-        (r'\b(artificial intelligence|machine learning|neural network|algorithm)\b', 'AI/tech article'),
+        (r'\b(software development|app development|download|install|click here|subscribe now)\b', 'technology/tutorial content'),
+        (r'\b(how to make|step-by-step guide)\b', 'instructional content'),
+        (r'\b(buy now|price tag|discount offer|sale price|shop now|add to cart)\b', 'commercial/shopping content'),
+        (r'\b(machine learning model|neural network training|deep learning)\b', 'AI/tech article'),
     ]
     
     text_lower = text.lower()
@@ -162,11 +162,18 @@ def load_model():
 
 def generate_summary(model, tokenizer, judgment_text, max_length=256):
     """Generate summary for a legal judgment"""
+    # Truncate input to fit context window (keep more for better understanding)
+    words = judgment_text.split()
+    if len(words) > 1200:
+        judgment_text_truncated = " ".join(words[:1200])
+    else:
+        judgment_text_truncated = judgment_text
+    
     prompt = f"""Instruction:
 Summarize the following legal court judgment.
 
 Input:
-{judgment_text}
+{judgment_text_truncated}
 
 Response:
 """
@@ -175,28 +182,46 @@ Response:
         prompt,
         return_tensors="pt",
         truncation=True,
-        max_length=1280
+        max_length=1536  # Increased from 1280 for longer inputs
     ).to(model.device)
+    
+    # Get input length to know where generation starts
+    input_length = inputs['input_ids'].shape[1]
     
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_length,
-            temperature=0.7,
-            top_p=0.9,
+            temperature=0.3,  # Lower temperature for more focused, accurate output
+            top_p=0.85,  # Slightly lower for less randomness
             do_sample=True,
+            repetition_penalty=1.2,  # Penalize repetition
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
     
-    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    # Decode only the generated part (excluding the input prompt)
+    generated_ids = outputs[0][input_length:]
+    summary = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
     
-    if "Response:" in generated_text:
-        summary = generated_text.split("Response:")[-1].strip()
-    else:
-        summary = generated_text[len(prompt):].strip()
+    # Cleanup: remove any remaining artifacts
+    if summary.startswith("Response:"):
+        summary = summary[9:].strip()
+    if summary.startswith("Instruction:"):
+        summary = summary.split("Response:")[-1].strip() if "Response:" in summary else ""
     
-    return summary
+    # Remove HTML tags if present (hallucination artifact)
+    import re
+    summary = re.sub(r'<[^>]+>', '', summary)
+    
+    # If still empty or very short, try alternative parsing
+    if len(summary) < 10:
+        full_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        if "Response:" in full_text:
+            summary = full_text.split("Response:")[-1].strip()
+            summary = re.sub(r'<[^>]+>', '', summary)  # Clean HTML again
+    
+    return summary if summary else "Unable to generate summary. Please try with a shorter input or different text."
 
 def predict(judgment_text, max_length):
     """Main prediction function for Gradio interface"""
@@ -268,31 +293,93 @@ EXAMPLES = [
     ]
 ]
 
-# Build Gradio interface
-with gr.Blocks(title="Legal Case Summarizer") as demo:
+# Build Gradio interface with custom styling
+custom_css = """
+    .gradio-container {
+        font-family: 'IBM Plex Sans', sans-serif;
+    }
+    .header-box {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        padding: 2rem;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+        color: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 8px;
+        color: white;
+        margin: 0.5rem 0;
+    }
+    .warning-box {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: white;
+        margin: 1rem 0;
+        font-weight: 500;
+    }
+    .success-box {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+    }
+    #input-section, #output-section {
+        border: 2px solid #e0e7ff;
+        border-radius: 12px;
+        padding: 1.5rem;
+        background: linear-gradient(to bottom, #ffffff 0%, #f8faff 100%);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .footer-section {
+        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-top: 2rem;
+    }
+"""
+
+with gr.Blocks(title="Legal Case Summarizer", css=custom_css, theme=gr.themes.Soft()) as demo:
     # Check hardware on startup
     hardware_status = "🟢 GPU" if torch.cuda.is_available() else "🟡 CPU"
-    performance_note = "" if torch.cuda.is_available() else "\n⏳ **Note:** Running on CPU - generation may take 30-60 seconds per summary."
+    performance_note = "" if torch.cuda.is_available() else "\n\n<div class='warning-box'>⏱️ <strong>Performance Note:</strong> Running on CPU - generation may take 30-60 seconds per summary. For faster results, upgrade to GPU hardware.</div>"
     
-    gr.Markdown(f"""
-    # ⚖️ Legal Case Summarization Assistant
-    ### Powered by LoRA Fine-tuned Gemma-2B {hardware_status}
+    gr.HTML(f"""
+        <div class='header-box'>
+            <h1 style='margin: 0; font-size: 2.5rem; font-weight: 700;'>
+                ⚖️ Legal Case Summarization Assistant
+            </h1>
+            <h3 style='margin: 0.5rem 0 0 0; font-weight: 400; opacity: 0.95;'>
+                Powered by LoRA Fine-tuned Gemma-2B • {hardware_status}
+            </h3>
+            <p style='margin: 1rem 0 0 0; font-size: 1.1rem; opacity: 0.9;'>
+                Generate concise, AI-powered summaries of legal court judgments with 79% semantic accuracy
+            </p>
+        </div>
+    """)
     
-    Generate concise summaries of legal court judgments using AI. This model was fine-tuned on legal case data 
-    and achieves 79% BERTScore F1 for semantic accuracy.{performance_note}
+    if not torch.cuda.is_available():
+        gr.HTML(performance_note)
     
-    ⚠️ **Important:** This model only processes legal case documents. Non-legal content will be rejected.
+    gr.HTML("""
+        <div class='warning-box' style='text-align: center;'>
+            ⚠️ <strong>Important:</strong> This model only processes legal case documents. Non-legal content will be automatically rejected.
+        </div>
     """)
     
     with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("### 📄 Legal Judgment Input")
+        with gr.Column(scale=1, elem_id="input-section"):
+            gr.HTML("<h3 style='color: #1e3c72; margin-top: 0;'>📄 Legal Judgment Input</h3>")
             
             judgment_input = gr.Textbox(
-                label="Enter Legal Judgment",
-                placeholder="Paste the full legal judgment here...",
+                label="",
+                placeholder="📋 Paste the full legal judgment here...\n\nExample: 'The appellant filed a suit for specific performance of contract...'",
                 lines=15,
-                max_lines=20
+                max_lines=20,
+                show_label=False
             )
             
             with gr.Row():
@@ -301,58 +388,102 @@ with gr.Blocks(title="Legal Case Summarizer") as demo:
                     maximum=512,
                     value=256,
                     step=64,
-                    label="Max Summary Length (tokens)",
+                    label="📏 Max Summary Length (tokens)",
                     info="Longer = more detailed summary"
                 )
             
             with gr.Row():
-                clear_btn = gr.Button("🗑️ Clear", variant="secondary")
-                submit_btn = gr.Button("🚀 Generate Summary", variant="primary", scale=2)
+                clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="lg")
+                submit_btn = gr.Button("🚀 Generate Summary", variant="primary", scale=2, size="lg")
         
-        with gr.Column(scale=1):
-            gr.Markdown("### 📝 Generated Summary")
+        with gr.Column(scale=1, elem_id="output-section"):
+            gr.HTML("<h3 style='color: #1e3c72; margin-top: 0;'>📝 Generated Summary</h3>")
             
             status_output = gr.Textbox(
-                label="Status",
+                label="",
                 value="👈 Enter a legal judgment and click 'Generate Summary'",
                 lines=1,
-                show_label=False
+                show_label=False,
+                container=False
             )
             
             summary_output = gr.Textbox(
-                label="Summary",
-                placeholder="Your summary will appear here...",
+                label="",
+                placeholder="✨ Your AI-generated summary will appear here...",
                 lines=13,
-                max_lines=15
+                max_lines=15,
+                show_label=False
             )
             
             stats_output = gr.Textbox(
-                label="Generation Stats",
-                lines=1,
-                show_label=False
+                label="",
+                lines=2,
+                show_label=False,
+                container=False
             )
     
-    gr.Markdown("### 📚 Example Legal Cases")
+    gr.HTML("<h3 style='color: #1e3c72; margin: 2rem 0 1rem 0; text-align: center;'>📚 Example Legal Cases</h3>")
+    
     gr.Examples(
         examples=EXAMPLES,
         inputs=[judgment_input, max_length_slider],
-        label="Click an example to load it"
+        label=None
     )
     
-    gr.Markdown("""
-    ---
-    ### 📊 Model Performance Metrics
-    - **ROUGE-1:** 0.2908 (Vocabulary coverage)
-    - **ROUGE-L:** 0.1760 (Structural coherence)  
-    - **BERTScore F1:** 0.7902 (Semantic accuracy)
-    - **Perplexity:** 6.80 (Model confidence)
-    
-    ### ⚠️ Disclaimer
-    This is an AI-generated summary for research purposes only. Always consult qualified legal professionals for legal advice.
-    
-    ### 🔗 Links
-    - [GitHub Repository](https://github.com/mangaorphy/Domain-Specific-FIned-Tuned-Legal-AI)
-    - [Model Details](https://github.com/mangaorphy/Domain-Specific-FIned-Tuned-Legal-AI/blob/main/README.md)
+    gr.HTML("""
+        <div class='footer-section'>
+            <h3 style='color: #1e3c72; margin-top: 0; text-align: center;'>📊 Model Performance Metrics</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1.5rem 0;'>
+                <div class='metric-card'>
+                    <div style='font-size: 2rem; font-weight: 700;'>29.08%</div>
+                    <div style='opacity: 0.9;'>ROUGE-1</div>
+                    <div style='font-size: 0.85rem; opacity: 0.8;'>Vocabulary coverage</div>
+                </div>
+                <div class='metric-card'>
+                    <div style='font-size: 2rem; font-weight: 700;'>17.60%</div>
+                    <div style='opacity: 0.9;'>ROUGE-L</div>
+                    <div style='font-size: 0.85rem; opacity: 0.8;'>Structural coherence</div>
+                </div>
+                <div class='metric-card'>
+                    <div style='font-size: 2rem; font-weight: 700;'>79.02%</div>
+                    <div style='opacity: 0.9;'>BERTScore F1</div>
+                    <div style='font-size: 0.85rem; opacity: 0.8;'>Semantic accuracy</div>
+                </div>
+                <div class='metric-card'>
+                    <div style='font-size: 2rem; font-weight: 700;'>6.80</div>
+                    <div style='opacity: 0.9;'>Perplexity</div>
+                    <div style='font-size: 0.85rem; opacity: 0.8;'>Model confidence</div>
+                </div>
+            </div>
+            
+            <div style='background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1.5rem;'>
+                <h4 style='color: #1e3c72; margin-top: 0;'>⚠️ Disclaimer</h4>
+                <p style='color: #4b5563; margin: 0.5rem 0;'>
+                    This is an AI-generated summary for research and educational purposes only. 
+                    Always consult qualified legal professionals for legal advice. The summaries 
+                    should not be used as a substitute for professional legal counsel.
+                </p>
+                
+                <h4 style='color: #1e3c72; margin-top: 1.5rem;'>🔗 Resources</h4>
+                <div style='display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem;'>
+                    <a href='https://github.com/mangaorphy/Domain-Specific-FIned-Tuned-Legal-AI' 
+                       style='color: #2563eb; text-decoration: none; font-weight: 500;'
+                       target='_blank'>
+                        📂 GitHub Repository
+                    </a>
+                    <span style='color: #d1d5db;'>|</span>
+                    <a href='https://github.com/mangaorphy/Domain-Specific-FIned-Tuned-Legal-AI/blob/main/README.md' 
+                       style='color: #2563eb; text-decoration: none; font-weight: 500;'
+                       target='_blank'>
+                        📖 Model Documentation
+                    </a>
+                    <span style='color: #d1d5db;'>|</span>
+                    <span style='color: #6b7280;'>
+                        🏗️ Built with LoRA & Gemma-2B
+                    </span>
+                </div>
+            </div>
+        </div>
     """)
     
     # Event handlers
@@ -363,12 +494,16 @@ with gr.Blocks(title="Legal Case Summarizer") as demo:
     )
     
     clear_btn.click(
-        fn=lambda: ("", "", "👈 Enter a legal judgment and click 'Generate Summary'"),
+        fn=lambda: ("", "", "", "👈 Enter a legal judgment and click 'Generate Summary'"),
         inputs=None,
-        outputs=[judgment_input, summary_output, status_output]
+        outputs=[judgment_input, summary_output, stats_output, status_output]
     )
 
 # Launch the app
 if __name__ == "__main__":
-    demo.queue()  # Enable queuing for better performance
-    demo.launch(share=False)
+    demo.queue(max_size=20)  # Enable queuing for better performance with multiple users
+    demo.launch(
+        share=False,
+        show_api=False,
+        favicon_path=None  # You can add a custom favicon here
+    )
