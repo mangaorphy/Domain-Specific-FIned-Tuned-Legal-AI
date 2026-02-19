@@ -62,3 +62,4 @@ kaggle.json
 *.bak
 *~
 .DS_Store
+Hugging_Face_Deploy/
