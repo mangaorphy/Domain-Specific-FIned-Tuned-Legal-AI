@@ -35,6 +35,43 @@ Test the model directly in your browser with our interactive Gradio interface. T
 - Pre-loaded example cases
 - Modern, user-friendly interface
 
+## Project Structure
+
+```
+Domain-Specific-FIned-Tuned-Legal-AI/
+│
+├── README.md                                    # Project documentation
+├── requirements.txt                             # Python dependencies
+│
+├── legal-case-summarization-lora (1).ipynb     # Training notebook
+│   └── Complete training pipeline with evaluation
+│
+├── model_outputs/                               # Fine-tuned model files
+│   ├── adapter_config.json                     # LoRA adapter configuration
+│   ├── adapter_model.safetensors               # LoRA weights (7MB)
+│   ├── tokenizer.json                          # Tokenizer vocabulary
+│   ├── tokenizer_config.json                   # Tokenizer settings
+│   └── evaluation_results.csv                  # Performance metrics
+│
+├── testing_scripts/                             # Testing utilities
+│   ├── qualitative_testing.py                  # Manual testing script
+│   └── safe_legal_summarizer.py                # Validation examples
+│
+├── app.py                                       # Local Gradio demo
+│
+└── Hugging_Face_Deploy/                        # HuggingFace Space (ignored in git)
+    ├── app.py                                  # Production Gradio app
+    ├── requirements.txt                        # Deployment dependencies
+    ├── README.md                               # Space documentation
+    └── model_outputs/                          # Copied model files
+```
+
+**Key Files:**
+- **Training:** `legal-case-summarization-lora (1).ipynb` contains the complete fine-tuning process
+- **Model:** `model_outputs/` contains the LoRA adapters and tokenizer files
+- **Demo:** `app.py` for local testing, `Hugging_Face_Deploy/` for production
+- **Testing:** Scripts in `testing_scripts/` for qualitative evaluation
+
 ## Model Overview
 
 This model generates concise summaries of complex legal court judgments, trained specifically on legal domain text. It transforms lengthy court documents into coherent summaries while preserving key legal reasoning, decisions, and citations.
