@@ -24,9 +24,19 @@ metrics:
 
 A domain-specific fine-tuned model for automated legal case summarization, built on Google's Gemma-2B using Low-Rank Adaptation (LoRA).
 
+## 🔗 Quick Links
+
+- **Live Demo:** [HuggingFace Space](https://huggingface.co/spaces/manga44/TogetherSO)
+- ** Video Demo:** [YouTube Tutorial](https://youtu.be/XH0J5CdNGgI)
+- **GitHub Repository:** [Source Code](https://github.com/mangaorphy/Domain-Specific-FIned-Tuned-Legal-AI)
+
+---
+
 ## Try It Now!
 
 **Live Demo:** [https://huggingface.co/spaces/manga44/TogetherSO](https://huggingface.co/spaces/manga44/TogetherSO)
+
+**Video Tutorial:** [Watch on YouTube](https://youtu.be/XH0J5CdNGgI) 🎥
 
 Test the model directly in your browser with our interactive Gradio interface. The demo includes:
 - Real-time legal case summarization
@@ -34,6 +44,8 @@ Test the model directly in your browser with our interactive Gradio interface. T
 - Input validation (legal content only)
 - Pre-loaded example cases
 - Modern, user-friendly interface
+
+Watch the video tutorial above to see the model in action and learn how to use it effectively!
 
 ## Project Structure
 
@@ -367,18 +379,6 @@ lora_config = {
     'target_modules': ['q_proj', 'k_proj'],
 }
 ```
-## License
-
-- **Model:** Gemma License (must accept terms at [google/gemma-2b](https://huggingface.co/google/gemma-2b))
-- **Code:** MIT License
-- **Dataset:** CC BY 4.0
-
-## Acknowledgments
-
-- Google for the Gemma base model
-- Joel Niklaus et al. for the legal case summarization dataset
-- Hugging Face for PEFT and Transformers libraries
-- Kaggle for providing free GPU compute
 
 ## Deployment
 
@@ -403,17 +403,17 @@ The model is deployed and publicly accessible via HuggingFace Spaces:
 ## Use Cases
 
 **Ideal For:**
-- ✅ Legal research assistants reviewing case law
-- ✅ Law students studying court judgments
-- ✅ Legal tech platforms needing automated case summaries
-- ✅ Document triage in legal departments
-- ✅ Initial case analysis before detailed review
+- Legal research assistants reviewing case law
+- Law students studying court judgments
+- Legal tech platforms needing automated case summaries
+- Document triage in legal departments
+- Initial case analysis before detailed review
 
 **Not Recommended For:**
-- ❌ Final legal advice or court submissions without human review
-- ❌ Processing non-legal documents (model includes validation)
-- ❌ Cases requiring exact citation verification
-- ❌ Real-time applications requiring sub-second response times
+- Final legal advice or court submissions without human review
+- Processing non-legal documents (model includes validation)
+- Cases requiring exact citation verification
+- Real-time applications requiring sub-second response times
 
 **Framework Versions:**
 - PEFT: 0.18.1

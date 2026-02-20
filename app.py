@@ -164,13 +164,13 @@ def generate_summary(model, tokenizer, judgment_text, max_length=256):
     """Generate summary for a legal judgment"""
     # Truncate input to fit context window (keep more for better understanding)
     words = judgment_text.split()
-    if len(words) > 1200:
-        judgment_text_truncated = " ".join(words[:1200])
+    if len(words) > 1000:
+        judgment_text_truncated = " ".join(words[:1000])
     else:
         judgment_text_truncated = judgment_text
     
     prompt = f"""Instruction:
-Summarize the following legal court judgment.
+Summarize the following legal court judgment in a concise paragraph. Focus on the key facts, legal issues, and outcome.
 
 Input:
 {judgment_text_truncated}
@@ -182,7 +182,7 @@ Response:
         prompt,
         return_tensors="pt",
         truncation=True,
-        max_length=1536  # Increased from 1280 for longer inputs
+        max_length=1280
     ).to(model.device)
     
     # Get input length to know where generation starts
@@ -192,10 +192,12 @@ Response:
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_length,
-            temperature=0.3,  # Lower temperature for more focused, accurate output
-            top_p=0.85,  # Slightly lower for less randomness
+            temperature=0.4,  # Slightly higher for more natural language
+            top_p=0.9,
+            top_k=50,
             do_sample=True,
-            repetition_penalty=1.2,  # Penalize repetition
+            repetition_penalty=1.3,  # Higher to prevent repetition
+            no_repeat_ngram_size=3,  # Prevent 3-gram repetition
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
@@ -210,18 +212,36 @@ Response:
     if summary.startswith("Instruction:"):
         summary = summary.split("Response:")[-1].strip() if "Response:" in summary else ""
     
+    # Remove common prefixes that might appear
+    prefixes_to_remove = ["Summary:", "SUMMARY:", "The summary is:", "Here is the summary:"]
+    for prefix in prefixes_to_remove:
+        if summary.startswith(prefix):
+            summary = summary[len(prefix):].strip()
+    
     # Remove HTML tags if present (hallucination artifact)
     import re
     summary = re.sub(r'<[^>]+>', '', summary)
+    
+    # Remove any leading/trailing quotes or brackets
+    summary = summary.strip('"\'[]')
     
     # If still empty or very short, try alternative parsing
     if len(summary) < 10:
         full_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
         if "Response:" in full_text:
             summary = full_text.split("Response:")[-1].strip()
-            summary = re.sub(r'<[^>]+>', '', summary)  # Clean HTML again
+            summary = re.sub(r'<[^>]+>', '', summary)
+            summary = summary.strip('"\'[]')
     
-    return summary if summary else "Unable to generate summary. Please try with a shorter input or different text."
+    # Capitalize first letter if it's lowercase
+    if summary and summary[0].islower():
+        summary = summary[0].upper() + summary[1:]
+    
+    # Ensure proper sentence ending
+    if summary and not summary.endswith(('.', '!', '?')):
+        summary += '.'
+    
+    return summary if summary and len(summary) > 10 else "Unable to generate summary. Please try with a shorter input or different text."
 
 def predict(judgment_text, max_length):
     """Main prediction function for Gradio interface"""

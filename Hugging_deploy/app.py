@@ -164,13 +164,13 @@ def generate_summary(model, tokenizer, judgment_text, max_length=256):
     """Generate summary for a legal judgment"""
     # Truncate input to fit context window (keep more for better understanding)
     words = judgment_text.split()
-    if len(words) > 1200:
-        judgment_text_truncated = " ".join(words[:1200])
+    if len(words) > 1000:
+        judgment_text_truncated = " ".join(words[:1000])
     else:
         judgment_text_truncated = judgment_text
     
     prompt = f"""Instruction:
-Summarize the following legal court judgment.
+Summarize the following legal court judgment in a concise paragraph. Focus on the key facts, legal issues, and outcome.
 
 Input:
 {judgment_text_truncated}
@@ -182,7 +182,7 @@ Response:
         prompt,
         return_tensors="pt",
         truncation=True,
-        max_length=1536  # Increased from 1280 for longer inputs
+        max_length=1280
     ).to(model.device)
     
     # Get input length to know where generation starts
@@ -192,10 +192,12 @@ Response:
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_length,
-            temperature=0.3,  # Lower temperature for more focused, accurate output
-            top_p=0.85,  # Slightly lower for less randomness
+            temperature=0.4,  # Slightly higher for more natural language
+            top_p=0.9,
+            top_k=50,
             do_sample=True,
-            repetition_penalty=1.2,  # Penalize repetition
+            repetition_penalty=1.3,  # Higher to prevent repetition
+            no_repeat_ngram_size=3,  # Prevent 3-gram repetition
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
@@ -210,18 +212,36 @@ Response:
     if summary.startswith("Instruction:"):
         summary = summary.split("Response:")[-1].strip() if "Response:" in summary else ""
     
+    # Remove common prefixes that might appear
+    prefixes_to_remove = ["Summary:", "SUMMARY:", "The summary is:", "Here is the summary:"]
+    for prefix in prefixes_to_remove:
+        if summary.startswith(prefix):
+            summary = summary[len(prefix):].strip()
+    
     # Remove HTML tags if present (hallucination artifact)
     import re
     summary = re.sub(r'<[^>]+>', '', summary)
+    
+    # Remove any leading/trailing quotes or brackets
+    summary = summary.strip('"\'[]')
     
     # If still empty or very short, try alternative parsing
     if len(summary) < 10:
         full_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
         if "Response:" in full_text:
             summary = full_text.split("Response:")[-1].strip()
-            summary = re.sub(r'<[^>]+>', '', summary)  # Clean HTML again
+            summary = re.sub(r'<[^>]+>', '', summary)
+            summary = summary.strip('"\'[]')
     
-    return summary if summary else "Unable to generate summary. Please try with a shorter input or different text."
+    # Capitalize first letter if it's lowercase
+    if summary and summary[0].islower():
+        summary = summary[0].upper() + summary[1:]
+    
+    # Ensure proper sentence ending
+    if summary and not summary.endswith(('.', '!', '?')):
+        summary += '.'
+    
+    return summary if summary and len(summary) > 10 else "Unable to generate summary. Please try with a shorter input or different text."
 
 def predict(judgment_text, max_length):
     """Main prediction function for Gradio interface"""
@@ -296,49 +316,95 @@ EXAMPLES = [
 # Build Gradio interface with custom styling
 custom_css = """
     .gradio-container {
-        font-family: 'IBM Plex Sans', sans-serif;
+        font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        min-height: 100vh;
     }
     .header-box {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        padding: 2rem;
-        border-radius: 12px;
-        margin-bottom: 1.5rem;
+        background: linear-gradient(135deg, #0f2027 0%, #2c5364 100%);
+        padding: 2.5rem;
+        border-radius: 16px;
+        margin-bottom: 2rem;
         color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        border: 1px solid rgba(255,255,255,0.1);
     }
     .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 8px;
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        padding: 1.5rem;
+        border-radius: 12px;
         color: white;
         margin: 0.5rem 0;
+        box-shadow: 0 4px 15px rgba(17, 153, 142, 0.4);
+        border: 1px solid rgba(255,255,255,0.15);
     }
     .warning-box {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
         padding: 1.5rem;
-        border-radius: 10px;
+        border-radius: 12px;
         color: white;
         margin: 1rem 0;
         font-weight: 500;
-    }
-    .success-box {
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
+        box-shadow: 0 4px 15px rgba(86, 171, 47, 0.3);
+        border: 1px solid rgba(255,255,255,0.2);
     }
     #input-section, #output-section {
-        border: 2px solid #e0e7ff;
-        border-radius: 12px;
-        padding: 1.5rem;
-        background: linear-gradient(to bottom, #ffffff 0%, #f8faff 100%);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        border: 2px solid rgba(56, 239, 125, 0.3);
+        border-radius: 16px;
+        padding: 2rem;
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
     }
     .footer-section {
-        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
+        background: linear-gradient(135deg, #0f2027 0%, #2c5364 100%);
+        padding: 2rem;
+        border-radius: 16px;
         margin-top: 2rem;
+        color: white;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        border: 1px solid rgba(255,255,255,0.1);
+    }
+    .disclaimer-card {
+        background: rgba(255,255,255,0.08);
+        padding: 1.5rem;
+        border-radius: 12px;
+        margin-top: 1.5rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        border-left: 4px solid #38ef7d;
+        backdrop-filter: blur(10px);
+    }
+    .resource-link {
+        color: #38ef7d !important;
+        text-decoration: none;
+        font-weight: 600;
+        transition: color 0.3s ease;
+    }
+    .resource-link:hover {
+        color: #11998e !important;
+    }
+    button[variant="primary"] {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%) !important;
+        border: none !important;
+        box-shadow: 0 4px 15px rgba(56, 239, 125, 0.4) !important;
+        transition: all 0.3s ease !important;
+    }
+    button[variant="primary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(56, 239, 125, 0.5) !important;
+    }
+    button[variant="secondary"] {
+        background: rgba(255,255,255,0.1) !important;
+        border: 1px solid rgba(255,255,255,0.3) !important;
+        color: white !important;
+    }
+    label, .gr-form {
+        color: #e0e0e0 !important;
+    }
+    input, textarea {
+        background: rgba(255,255,255,0.1) !important;
+        border-color: rgba(56, 239, 125, 0.3) !important;
+        color: #ffffff !important;
     }
 """
 
@@ -349,14 +415,14 @@ with gr.Blocks(title="Legal Case Summarizer") as demo:
     
     gr.HTML(f"""
         <div class='header-box'>
-            <h1 style='margin: 0; font-size: 2.5rem; font-weight: 700;'>
+            <h1 style='margin: 0; font-size: 2.8rem; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.3);'>
                 ⚖️ Legal Case Summarization Assistant
             </h1>
-            <h3 style='margin: 0.5rem 0 0 0; font-weight: 400; opacity: 0.95;'>
+            <h3 style='margin: 0.5rem 0 0 0; font-weight: 400; opacity: 0.95; font-size: 1.2rem;'>
                 Powered by LoRA Fine-tuned Gemma-2B • {hardware_status}
             </h3>
-            <p style='margin: 1rem 0 0 0; font-size: 1.1rem; opacity: 0.9;'>
-                Generate concise, AI-powered summaries of legal court judgments with 79% semantic accuracy
+            <p style='margin: 1rem 0 0 0; font-size: 1.1rem; opacity: 0.9; line-height: 1.5;'>
+                Generate concise, AI-powered summaries of legal court judgments with <strong>79% semantic accuracy</strong>
             </p>
         </div>
     """)
@@ -366,13 +432,24 @@ with gr.Blocks(title="Legal Case Summarizer") as demo:
     
     gr.HTML("""
         <div class='warning-box' style='text-align: center;'>
-            ⚠️ <strong>Important:</strong> This model only processes legal case documents. Non-legal content will be automatically rejected.
+            <div style='font-size: 1.5rem; margin-bottom: 0.5rem;'>⚠️</div>
+            <strong style='font-size: 1.1rem;'>Important:</strong> This model only processes legal case documents. Non-legal content will be automatically rejected.
         </div>
     """)
     
     with gr.Row():
         with gr.Column(scale=1, elem_id="input-section"):
-            gr.HTML("<h3 style='color: #1e3c72; margin-top: 0;'>📄 Legal Judgment Input</h3>")
+            gr.HTML("""
+                <h3 style='background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); 
+                           -webkit-background-clip: text; 
+                           -webkit-text-fill-color: transparent; 
+                           background-clip: text; 
+                           margin-top: 0; 
+                           font-size: 1.5rem; 
+                           font-weight: 700;'>
+                    📄 Legal Judgment Input
+                </h3>
+            """)
             
             judgment_input = gr.Textbox(
                 label="",
@@ -397,7 +474,17 @@ with gr.Blocks(title="Legal Case Summarizer") as demo:
                 submit_btn = gr.Button("🚀 Generate Summary", variant="primary", scale=2, size="lg")
         
         with gr.Column(scale=1, elem_id="output-section"):
-            gr.HTML("<h3 style='color: #1e3c72; margin-top: 0;'>📝 Generated Summary</h3>")
+            gr.HTML("""
+                <h3 style='background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); 
+                           -webkit-background-clip: text; 
+                           -webkit-text-fill-color: transparent; 
+                           background-clip: text; 
+                           margin-top: 0; 
+                           font-size: 1.5rem; 
+                           font-weight: 700;'>
+                    📝 Generated Summary
+                </h3>
+            """)
             
             status_output = gr.Textbox(
                 label="",
@@ -422,7 +509,18 @@ with gr.Blocks(title="Legal Case Summarizer") as demo:
                 container=False
             )
     
-    gr.HTML("<h3 style='color: #1e3c72; margin: 2rem 0 1rem 0; text-align: center;'>📚 Example Legal Cases</h3>")
+    gr.HTML("""
+        <h3 style='background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); 
+                   -webkit-background-clip: text; 
+                   -webkit-text-fill-color: transparent; 
+                   background-clip: text; 
+                   margin: 2rem 0 1rem 0; 
+                   text-align: center; 
+                   font-size: 1.8rem; 
+                   font-weight: 700;'>
+            📚 Example Legal Cases
+        </h3>
+    """)
     
     gr.Examples(
         examples=EXAMPLES,
@@ -432,53 +530,53 @@ with gr.Blocks(title="Legal Case Summarizer") as demo:
     
     gr.HTML("""
         <div class='footer-section'>
-            <h3 style='color: #1e3c72; margin-top: 0; text-align: center;'>📊 Model Performance Metrics</h3>
+            <h3 style='color: #ffffff; margin-top: 0; text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,0.2);'>📊 Model Performance Metrics</h3>
             <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1.5rem 0;'>
                 <div class='metric-card'>
-                    <div style='font-size: 2rem; font-weight: 700;'>29.08%</div>
-                    <div style='opacity: 0.9;'>ROUGE-1</div>
-                    <div style='font-size: 0.85rem; opacity: 0.8;'>Vocabulary coverage</div>
+                    <div style='font-size: 2.5rem; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);'>29.08%</div>
+                    <div style='opacity: 0.95; font-size: 1.1rem; font-weight: 600;'>ROUGE-1</div>
+                    <div style='font-size: 0.9rem; opacity: 0.85; margin-top: 0.25rem;'>Vocabulary coverage</div>
                 </div>
                 <div class='metric-card'>
-                    <div style='font-size: 2rem; font-weight: 700;'>17.60%</div>
-                    <div style='opacity: 0.9;'>ROUGE-L</div>
-                    <div style='font-size: 0.85rem; opacity: 0.8;'>Structural coherence</div>
+                    <div style='font-size: 2.5rem; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);'>17.60%</div>
+                    <div style='opacity: 0.95; font-size: 1.1rem; font-weight: 600;'>ROUGE-L</div>
+                    <div style='font-size: 0.9rem; opacity: 0.85; margin-top: 0.25rem;'>Structural coherence</div>
                 </div>
                 <div class='metric-card'>
-                    <div style='font-size: 2rem; font-weight: 700;'>79.02%</div>
-                    <div style='opacity: 0.9;'>BERTScore F1</div>
-                    <div style='font-size: 0.85rem; opacity: 0.8;'>Semantic accuracy</div>
+                    <div style='font-size: 2.5rem; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);'>79.02%</div>
+                    <div style='opacity: 0.95; font-size: 1.1rem; font-weight: 600;'>BERTScore F1</div>
+                    <div style='font-size: 0.9rem; opacity: 0.85; margin-top: 0.25rem;'>Semantic accuracy</div>
                 </div>
                 <div class='metric-card'>
-                    <div style='font-size: 2rem; font-weight: 700;'>6.80</div>
-                    <div style='opacity: 0.9;'>Perplexity</div>
-                    <div style='font-size: 0.85rem; opacity: 0.8;'>Model confidence</div>
+                    <div style='font-size: 2.5rem; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);'>6.80</div>
+                    <div style='opacity: 0.95; font-size: 1.1rem; font-weight: 600;'>Perplexity</div>
+                    <div style='font-size: 0.9rem; opacity: 0.85; margin-top: 0.25rem;'>Model confidence</div>
                 </div>
             </div>
             
-            <div style='background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1.5rem;'>
-                <h4 style='color: #1e3c72; margin-top: 0;'>⚠️ Disclaimer</h4>
-                <p style='color: #4b5563; margin: 0.5rem 0;'>
+            <div class='disclaimer-card'>
+                <h4 style='color: #11998e; margin-top: 0;'>⚠️ Disclaimer</h4>
+                <p style='color: #e0e0e0; margin: 0.5rem 0; line-height: 1.6;'>
                     This is an AI-generated summary for research and educational purposes only. 
                     Always consult qualified legal professionals for legal advice. The summaries 
                     should not be used as a substitute for professional legal counsel.
                 </p>
                 
-                <h4 style='color: #1e3c72; margin-top: 1.5rem;'>🔗 Resources</h4>
+                <h4 style='color: #11998e; margin-top: 1.5rem;'>🔗 Resources</h4>
                 <div style='display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem;'>
                     <a href='https://github.com/mangaorphy/Domain-Specific-FIned-Tuned-Legal-AI' 
-                       style='color: #2563eb; text-decoration: none; font-weight: 500;'
+                       class='resource-link'
                        target='_blank'>
                         📂 GitHub Repository
                     </a>
-                    <span style='color: #d1d5db;'>|</span>
+                    <span style='color: #888;'>|</span>
                     <a href='https://github.com/mangaorphy/Domain-Specific-FIned-Tuned-Legal-AI/blob/main/README.md' 
-                       style='color: #2563eb; text-decoration: none; font-weight: 500;'
+                       class='resource-link'
                        target='_blank'>
                         📖 Model Documentation
                     </a>
-                    <span style='color: #d1d5db;'>|</span>
-                    <span style='color: #6b7280;'>
+                    <span style='color: #888;'>|</span>
+                    <span style='color: #b0b0b0; font-weight: 500;'>
                         🏗️ Built with LoRA & Gemma-2B
                     </span>
                 </div>
